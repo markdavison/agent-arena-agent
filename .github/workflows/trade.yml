@@ -1,0 +1,21 @@
+name: Trade
+on:
+  schedule:
+    - cron: '2,17,32,47 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npx tsx src/index.ts
+        env:
+          AGENT_ID: ${{ secrets.AGENT_ID }}
+          AGENT_TOKEN: ${{ secrets.AGENT_TOKEN }}
+          ARENA_API_URL: ${{ secrets.ARENA_API_URL }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
