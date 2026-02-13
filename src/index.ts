@@ -1,14 +1,5 @@
-import {
-  checkVersion,
-  getClock,
-  getPortfolio,
-  getAssets,
-  validateDecision,
-  submitDecision,
-} from "./arena.js";
-import { decide } from "./strategy.js";
-import type { DecisionPayload } from "./types.js";
-import { SCHEMA_VERSION } from "./types.js";
+import { createMCPClient } from "@ai-sdk/mcp";
+import { runStrategy } from "./strategy.js";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -32,81 +23,61 @@ function buildWorkflowRunUrl(): string | undefined {
 }
 
 async function main(): Promise<void> {
-  const agentId = requireEnv("AGENT_ID");
-  requireEnv("AGENT_TOKEN");
-  requireEnv("ARENA_API_URL");
+  const agentToken = requireEnv("AGENT_TOKEN");
+  const apiUrl = requireEnv("ARENA_API_URL").replace(/\/+$/, "");
   requireEnv("XAI_API_KEY");
-  console.log(`[agent] Starting agent ${agentId}`);
-
-  console.log("[agent] Checking API version...");
-  const version = await checkVersion();
-  console.log(
-    `[agent] API version OK (schema=${String(version.schema_version)})`,
-  );
-
-  console.log("[agent] Fetching game clock...");
-  const clock = await getClock();
-  console.log(
-    `[agent] Interval ${clock.current_interval.id} ` +
-      `(${String(clock.seconds_remaining)}s remaining)`,
-  );
-
-  console.log("[agent] Fetching portfolio...");
-  const portfolio = await getPortfolio(agentId);
-  console.log(
-    `[agent] Portfolio NAV: $${String(portfolio.nav_usd.toFixed(2))}`,
-  );
-
-  console.log("[agent] Fetching assets...");
-  const assets = await getAssets();
-  console.log(`[agent] ${String(assets.length)} assets available`);
-
-  console.log("[agent] Running Grok strategy...");
-  const { trades, reasoning } = await decide({
-    portfolio,
-    clock,
-    assets,
-  });
-  console.log(`[agent] Reasoning: ${reasoning}`);
-  console.log(`[agent] Strategy produced ${String(trades.length)} trade(s)`);
+  const taostatsKey = process.env["TAOSTATS_API_KEY"] ?? "";
+  console.log("[agent] Starting agent");
 
   const repoUrl =
     process.env["GITHUB_SERVER_URL"] && process.env["GITHUB_REPOSITORY"]
       ? `${process.env["GITHUB_SERVER_URL"]}/${process.env["GITHUB_REPOSITORY"]}`
       : "";
+  const commitSha = process.env["GITHUB_SHA"] ?? "local";
+  const workflowRunUrl = buildWorkflowRunUrl();
 
-  const payload: DecisionPayload = {
-    schema_version: SCHEMA_VERSION,
-    decision: { trades },
-    reasoning,
-    metadata: {
-      repo_url: repoUrl,
-      commit_sha: process.env["GITHUB_SHA"] ?? "local",
-      workflow_run_url: buildWorkflowRunUrl(),
+  const arenaParams = new URLSearchParams({
+    token: agentToken,
+    repo_url: repoUrl,
+    commit_sha: commitSha,
+    workflow_run_url: workflowRunUrl ?? "",
+  });
+  const arenaSseUrl = `${apiUrl}/mcp/sse?${arenaParams.toString()}`;
+
+  console.log("[agent] Connecting to Arena MCP server...");
+  const arenaClient = await createMCPClient({
+    transport: { type: "sse", url: arenaSseUrl },
+  });
+
+  const taostatsHeaders: Record<string, string> = {};
+  if (taostatsKey) {
+    taostatsHeaders["Authorization"] = taostatsKey;
+  }
+
+  console.log("[agent] Connecting to Taostats MCP server...");
+  const taostatsClient = await createMCPClient({
+    transport: {
+      type: "sse",
+      url: "https://mcp.taostats.io?tools=data",
+      headers: taostatsHeaders,
     },
-  };
+  });
 
-  console.log("[agent] Validating decision...");
-  const validation = await validateDecision(agentId, payload);
-  for (const warning of validation.warnings) {
-    console.log(`[agent] Warning: ${warning}`);
-  }
-  if (!validation.valid) {
-    for (const error of validation.errors) {
-      console.error(`[agent] Validation error: ${error}`);
-    }
-    process.exitCode = 1;
-    return;
-  }
-  console.log("[agent] Validation passed");
+  try {
+    const arenaTools = await arenaClient.tools();
+    const taostatsTools = await taostatsClient.tools();
+    const allTools = { ...arenaTools, ...taostatsTools };
+    console.log(
+      `[agent] Loaded ${String(Object.keys(allTools).length)} tools`,
+    );
 
-  console.log("[agent] Submitting decision...");
-  const intervalStart = clock.current_interval.start_time;
-  const result = await submitDecision(agentId, payload, intervalStart);
-  console.log(
-    `[agent] Submitted! id=${result.submission_id} ` +
-      `interval=${result.interval_start}`,
-  );
+    console.log("[agent] Running strategy...");
+    await runStrategy(allTools);
+    console.log("[agent] Strategy complete");
+  } finally {
+    await arenaClient.close();
+    await taostatsClient.close();
+  }
 }
 
 main().catch((err: unknown) => {

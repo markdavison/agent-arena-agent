@@ -1,208 +1,51 @@
-import { createMCPClient } from "@ai-sdk/mcp";
-import { generateText, generateObject } from "ai";
+import { generateText, stepCountIs } from "ai";
 import { xai } from "@ai-sdk/xai";
-import { z } from "zod";
-import type {
-  Portfolio,
-  ClockResponse,
-  AssetInfo,
-  Trade,
-} from "./types.js";
+import type { ToolSet } from "ai";
 
-export type StrategyInput = {
-  portfolio: Portfolio;
-  clock: ClockResponse;
-  assets: AssetInfo[];
-};
+const SYSTEM_PROMPT = [
+  "You are an aggressive trading agent in Agent Arena,",
+  "a paper-trading competition on Bittensor.",
+  "This is a game with virtual money — there is ZERO downside",
+  "to trading. Holding USD means LOSING to agents who deploy capital.",
+  "",
+  "You have two sets of tools:",
+  "1. Arena tools: get_portfolio (your balances + assets),",
+  "   submit_decision (trade)",
+  "2. Taostats tools: look up current TAO price and subnet pool data",
+  "",
+  "Trade rules:",
+  "- All routes allowed: USD<->TAO, TAO<->ALPHA,",
+  "  USD<->ALPHA, ALPHA<->ALPHA",
+  "",
+  "Workflow:",
+  "1. Call get_portfolio to see your current holdings and",
+  "   available assets",
+  "2. Use Taostats tools to research market data",
+  "   (GetStats for TAO price, GetLatestSubnetPool for pool data)",
+  "3. Analyze: rank subnets by TAO reserve,",
+  "   look for interesting reserve ratios",
+  "4. Call submit_decision with your trades array and reasoning",
+  "",
+  "Strategy:",
+  "- Deploy 60-80% of idle USD into subnet alphas",
+  "- You CAN trade USD -> ALPHA directly (no need for TAO first)",
+  "- Spread across 3-5 subnets with highest liquidity pools",
+  "- Keep only ~20% USD as reserve",
+  "- If already holding assets, rebalance toward better subnets",
+  "- Empty trades array ONLY if already fully deployed",
+  "",
+  "If holding is the best move, submit an empty trades array.",
+  "You MUST call submit_decision exactly once as your final action.",
+].join("\n");
 
-export type StrategyOutput = {
-  trades: Trade[];
-  reasoning: string;
-};
-
-const tradeSchema = z.object({
-  trades: z.array(
-    z.object({
-      from: z
-        .string()
-        .describe("Asset to sell (e.g. 'USD', 'TAO', 'ALPHA_18')"),
-      to: z.string().describe("Asset to buy"),
-      amount: z
-        .number()
-        .positive()
-        .describe("Amount of the 'from' asset to trade"),
-    }),
-  ),
-  reasoning: z
-    .string()
-    .max(2000)
-    .describe("Brief explanation of your trading decision"),
-});
-
-function formatAssetList(assets: AssetInfo[]): string {
-  const alphas = assets.filter((a) => a.subnet_id !== null);
-  return alphas
-    .map(
-      (a) =>
-        `  ${a.asset_id} — ${a.name} (subnet ${String(a.subnet_id)})`,
-    )
-    .join("\n");
-}
-
-function buildResearchPrompt(input: StrategyInput): string {
-  const { portfolio, assets } = input;
-
-  const balanceLines = portfolio.balances
-    .map((b) => `  ${b.asset}: ${String(b.amount)}`)
-    .join("\n");
-
-  return [
-    "You are a market researcher for a Bittensor trading agent.",
-    "",
-    "TRADEABLE SUBNET ALPHA TOKENS:",
-    formatAssetList(assets),
-    "",
-    `CURRENT PORTFOLIO:\n${balanceLines}`,
-    `Portfolio value: $${String(portfolio.nav_usd.toFixed(2))}`,
-    "",
-    "INSTRUCTIONS:",
-    "1. Call GetStats to get the current TAO price and market data.",
-    "2. Call GetLatestSubnetPool to see pool data for all subnets",
-    "   (liquidity, TAO reserves, alpha reserves).",
-    "",
-    "After your tool calls, write a DETAILED summary covering:",
-    "- Current TAO price in USD",
-    "- Top 10 subnets ranked by TAO reserve (highest liquidity)",
-    "- Any subnets with interesting reserve ratios",
-    "- Which 3-5 subnets you recommend buying and why",
-    "",
-    "You MUST write a text summary. Do not stop after tool calls.",
-  ].join("\n");
-}
-
-function buildDecisionPrompt(
-  input: StrategyInput,
-  research: string,
-): string {
-  const { portfolio, clock } = input;
-
-  const balanceLines = portfolio.balances
-    .map((b) => `  ${b.asset}: ${String(b.amount)}`)
-    .join("\n");
-
-  return [
-    "You are an aggressive trading agent in Agent Arena,",
-    "a paper-trading competition on Bittensor. This is a game",
-    "with virtual money — there is ZERO downside to trading.",
-    "Holding USD means LOSING to agents who deploy capital.",
-    "",
-    "Portfolio:",
-    balanceLines,
-    `NAV: $${String(portfolio.nav_usd.toFixed(2))}`,
-    `Seconds remaining: ${String(clock.seconds_remaining)}`,
-    "",
-    "Market research:",
-    research,
-    "",
-    "Trading rules:",
-    "- USD -> TAO: allowed",
-    "- TAO -> USD: allowed",
-    "- TAO -> ALPHA_{subnet_id}: allowed",
-    "- ALPHA_{subnet_id} -> TAO: allowed",
-    "- USD -> ALPHA_{subnet_id}: allowed (auto-routes through TAO)",
-    "- ALPHA_{subnet_id} -> USD: allowed (auto-routes through TAO)",
-    "- ALPHA <-> ALPHA: NOT allowed (sell to TAO first)",
-    "",
-    "Strategy:",
-    "- Deploy 60-80% of idle USD into subnet alphas directly",
-    "- You CAN trade USD -> ALPHA directly (no need for TAO first)",
-    "- Spread across 3-5 subnets with the highest liquidity pools",
-    "- Keep only ~20% USD as reserve",
-    "- If already holding assets, rebalance toward better subnets",
-    "- Empty trades array ONLY if already fully deployed",
-    "",
-    "Make your trades now. Be decisive and deploy capital.",
-  ].join("\n");
-}
-
-export async function decide(
-  input: StrategyInput,
-): Promise<StrategyOutput> {
-  const taostatsKey = process.env["TAOSTATS_API_KEY"] ?? "";
-  const headers: Record<string, string> = {};
-  if (taostatsKey) {
-    headers["Authorization"] = taostatsKey;
-  }
-
-  console.log("[strategy] Connecting to Taostats MCP...");
-  const client = await createMCPClient({
-    transport: {
-      type: "http",
-      url: "https://mcp.taostats.io?tools=data",
-      headers,
-    },
+export async function runStrategy(tools: ToolSet): Promise<void> {
+  await generateText({
+    model: xai("grok-4-1-fast-non-reasoning"),
+    tools,
+    stopWhen: stepCountIs(10),
+    system: SYSTEM_PROMPT,
+    prompt:
+      "Analyze the market and make your trading decision" +
+      " for this interval.",
   });
-
-  try {
-    const mcpTools = await client.tools();
-    const toolNames = Object.keys(mcpTools);
-    console.log(`[strategy] MCP tools: ${toolNames.join(", ")}`);
-
-    console.log("[strategy] Phase 1: researching market...");
-    const { text: research, steps } = await generateText({
-      model: xai("grok-4-1-fast-non-reasoning"),
-      tools: mcpTools,
-      maxSteps: 5,
-      prompt: buildResearchPrompt(input),
-    });
-
-    for (const step of steps) {
-      for (const call of step.toolCalls ?? []) {
-        console.log(`[strategy] Tool: ${call.toolName}`);
-      }
-    }
-
-    // Fall back to raw tool results if model didn't summarize
-    let researchData = research;
-    if (!researchData.trim()) {
-      console.log(
-        "[strategy] Empty text response, using raw tool results",
-      );
-      const parts: string[] = [];
-      for (const step of steps) {
-        for (const r of step.toolResults ?? []) {
-          // AI SDK v6 uses 'output'; fall back to 'result'
-          const rec = r as Record<string, unknown>;
-          const raw = rec["output"] ?? rec["result"] ?? r;
-          const data =
-            typeof raw === "string"
-              ? raw
-              : JSON.stringify(raw, null, 2);
-          parts.push(`[${r.toolName}]:\n${data}`);
-        }
-      }
-      researchData = parts.join("\n\n");
-    }
-
-    if (researchData.length > 12000) {
-      researchData =
-        researchData.slice(0, 12000) + "\n[... truncated]";
-    }
-
-    console.log(
-      `[strategy] Research (${String(researchData.length)} chars): ` +
-        researchData.slice(0, 300),
-    );
-
-    console.log("[strategy] Phase 2: deciding trades...");
-    const { object } = await generateObject({
-      model: xai("grok-4-1-fast-non-reasoning"),
-      schema: tradeSchema,
-      prompt: buildDecisionPrompt(input, researchData),
-    });
-
-    return object;
-  } finally {
-    await client.close();
-  }
 }

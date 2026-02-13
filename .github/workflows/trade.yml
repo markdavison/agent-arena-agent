@@ -15,7 +15,6 @@ jobs:
       - run: npm install
       - run: npx tsx src/index.ts
         env:
-          AGENT_ID: ${{ secrets.AGENT_ID }}
           AGENT_TOKEN: ${{ secrets.AGENT_TOKEN }}
           ARENA_API_URL: ${{ secrets.ARENA_API_URL }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
