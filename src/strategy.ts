@@ -1,5 +1,5 @@
 import { createMCPClient } from "@ai-sdk/mcp";
-import { generateObject } from "ai";
+import { generateText, generateObject } from "ai";
 import { xai } from "@ai-sdk/xai";
 import { z } from "zod";
 import type {
@@ -39,26 +39,8 @@ const tradeSchema = z.object({
     .describe("1-2 sentence explanation of your trading decision"),
 });
 
-const SYSTEM_PROMPT = `You are a trading agent competing in Agent Arena.
-
-Your goal is to maximize your portfolio's NAV (net asset value in USD).
-
-Trading rules:
-- Valid routes: USD <-> TAO, and TAO <-> ALPHA_{subnet_id}
-- Direct USD <-> ALPHA and ALPHA <-> ALPHA trades are NOT allowed
-- Route through TAO: to buy ALPHA, first buy TAO with USD, then buy ALPHA with TAO
-- You can make 0 to 50 trades per interval (every 15 minutes)
-
-Strategy guidelines:
-- Be conservative — don't trade your entire balance at once
-- Keep some USD as a safety buffer
-- Return an empty trades array if you prefer to hold your current positions
-- Consider the time remaining in the interval when deciding trade sizes
-
-You have access to Taostats tools for live market data. Use them to look up current TAO price and subnet pool data before making trading decisions.`;
-
-function buildPrompt(input: StrategyInput): string {
-  const { portfolio, clock, assets } = input;
+function buildResearchPrompt(input: StrategyInput): string {
+  const { portfolio, assets } = input;
 
   const balanceLines = portfolio.balances
     .map((b) => `  ${b.asset}: ${String(b.amount)}`)
@@ -67,16 +49,51 @@ function buildPrompt(input: StrategyInput): string {
   const assetIds = assets.map((a) => a.asset_id).join(", ");
 
   return [
-    "Current portfolio:",
-    balanceLines,
-    "",
-    `NAV (USD): $${String(portfolio.nav_usd.toFixed(2))}`,
-    "",
+    "You are researching market data for a trading agent.",
     `Available assets: ${assetIds}`,
+    `Current portfolio:\n${balanceLines}`,
     "",
-    `Seconds remaining in interval: ${String(clock.seconds_remaining)}`,
+    "You MUST call these tools before responding:",
+    "1. Use GetStats to get the current TAO price in USD",
+    "2. Use GetLatestSubnetPool to check subnet pool data",
     "",
-    "Fetch current market data using the Taostats tools, then decide your trades.",
+    "After calling the tools, summarize the market data you found.",
+    "Include exact prices and any notable trends.",
+  ].join("\n");
+}
+
+function buildDecisionPrompt(
+  input: StrategyInput,
+  research: string,
+): string {
+  const { portfolio, clock } = input;
+
+  const balanceLines = portfolio.balances
+    .map((b) => `  ${b.asset}: ${String(b.amount)}`)
+    .join("\n");
+
+  return [
+    "You are a trading agent competing in Agent Arena.",
+    "",
+    "Portfolio:",
+    balanceLines,
+    `NAV: $${String(portfolio.nav_usd.toFixed(2))}`,
+    `Seconds remaining: ${String(clock.seconds_remaining)}`,
+    "",
+    "Market research:",
+    research,
+    "",
+    "Trading rules:",
+    "- USD <-> TAO direct trades allowed",
+    "- TAO <-> ALPHA_{subnet_id} direct trades allowed",
+    "- USD <-> ALPHA and ALPHA <-> ALPHA NOT allowed",
+    "",
+    "Guidelines:",
+    "- Be conservative, don't trade entire balance",
+    "- Keep some USD as safety buffer",
+    "- Empty trades array is valid if holding is best",
+    "",
+    "Decide your trades based on the market data above.",
   ].join("\n");
 }
 
@@ -103,28 +120,29 @@ export async function decide(
     const toolNames = Object.keys(mcpTools);
     console.log(`[strategy] MCP tools: ${toolNames.join(", ")}`);
 
-    console.log("[strategy] Calling Grok...");
-    const { object, steps } = await generateObject({
+    // Phase 1: research with tool calls
+    console.log("[strategy] Phase 1: fetching market data...");
+    const { text: research, steps } = await generateText({
       model: xai("grok-3-mini"),
-      schema: tradeSchema,
       tools: mcpTools,
       maxSteps: 5,
-      system: SYSTEM_PROMPT,
-      prompt: buildPrompt(input),
+      prompt: buildResearchPrompt(input),
     });
 
-    if (steps) {
-      console.log(`[strategy] Grok used ${String(steps.length)} step(s)`);
-      for (const step of steps) {
-        const calls = step.toolCalls ?? [];
-        if (calls.length > 0) {
-          const names = calls
-            .map((c: { toolName: string }) => c.toolName)
-            .join(", ");
-          console.log(`[strategy] Tool calls: ${names}`);
-        }
+    for (const step of steps) {
+      for (const call of step.toolCalls) {
+        console.log(`[strategy] Tool call: ${call.toolName}`);
       }
     }
+    console.log(`[strategy] Research: ${research.slice(0, 200)}`);
+
+    // Phase 2: structured decision from research
+    console.log("[strategy] Phase 2: deciding trades...");
+    const { object } = await generateObject({
+      model: xai("grok-3-mini"),
+      schema: tradeSchema,
+      prompt: buildDecisionPrompt(input, research),
+    });
 
     return object;
   } finally {
