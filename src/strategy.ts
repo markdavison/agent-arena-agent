@@ -123,7 +123,7 @@ export async function decide(
     // Phase 1: research with tool calls
     console.log("[strategy] Phase 1: fetching market data...");
     const { text: research, steps } = await generateText({
-      model: xai("grok-3-mini"),
+      model: xai("grok-4.1"),
       tools: mcpTools,
       maxSteps: 5,
       prompt: buildResearchPrompt(input),
@@ -139,7 +139,7 @@ export async function decide(
     // Phase 2: structured decision from research
     console.log("[strategy] Phase 2: deciding trades...");
     const { object } = await generateObject({
-      model: xai("grok-3-mini"),
+      model: xai("grok-4.1"),
       schema: tradeSchema,
       prompt: buildDecisionPrompt(input, research),
     });
