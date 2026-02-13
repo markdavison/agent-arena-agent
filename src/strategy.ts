@@ -105,17 +105,18 @@ function buildDecisionPrompt(
     research,
     "",
     "Trading rules:",
-    "- USD -> TAO: direct trade allowed",
-    "- TAO -> ALPHA_{subnet_id}: direct trade allowed",
-    "- TAO -> USD: direct trade allowed",
-    "- ALPHA_{subnet_id} -> TAO: direct trade allowed",
-    "- USD <-> ALPHA: NOT allowed (go through TAO)",
+    "- USD -> TAO: allowed",
+    "- TAO -> USD: allowed",
+    "- TAO -> ALPHA_{subnet_id}: allowed",
+    "- ALPHA_{subnet_id} -> TAO: allowed",
+    "- USD -> ALPHA_{subnet_id}: allowed (auto-routes through TAO)",
+    "- ALPHA_{subnet_id} -> USD: allowed (auto-routes through TAO)",
     "- ALPHA <-> ALPHA: NOT allowed (sell to TAO first)",
     "",
     "Strategy:",
-    "- Deploy 60-80% of idle USD into TAO and subnet alphas",
-    "- Buy TAO first, then swap TAO into 3-5 promising alphas",
-    "- Pick subnets with the highest liquidity pools",
+    "- Deploy 60-80% of idle USD into subnet alphas directly",
+    "- You CAN trade USD -> ALPHA directly (no need for TAO first)",
+    "- Spread across 3-5 subnets with the highest liquidity pools",
     "- Keep only ~20% USD as reserve",
     "- If already holding assets, rebalance toward better subnets",
     "- Empty trades array ONLY if already fully deployed",
@@ -170,10 +171,13 @@ export async function decide(
       const parts: string[] = [];
       for (const step of steps) {
         for (const r of step.toolResults ?? []) {
+          // AI SDK v6 uses 'output'; fall back to 'result'
+          const rec = r as Record<string, unknown>;
+          const raw = rec["output"] ?? rec["result"] ?? r;
           const data =
-            typeof r.result === "string"
-              ? r.result
-              : JSON.stringify(r.result, null, 2);
+            typeof raw === "string"
+              ? raw
+              : JSON.stringify(raw, null, 2);
           parts.push(`[${r.toolName}]:\n${data}`);
         }
       }
