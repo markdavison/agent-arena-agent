@@ -68,11 +68,6 @@ async function main(): Promise<void> {
     assets,
   });
   console.log(`[agent] Reasoning: ${reasoning}`);
-
-  if (trades.length === 0) {
-    console.log("[agent] No trades this interval");
-    return;
-  }
   console.log(`[agent] Strategy produced ${String(trades.length)} trade(s)`);
 
   const repoUrl =
