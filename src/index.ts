@@ -57,7 +57,7 @@ async function main(): Promise<void> {
   console.log("[agent] Connecting to Taostats MCP server...");
   const taostatsClient = await createMCPClient({
     transport: {
-      type: "sse",
+      type: "http",
       url: "https://mcp.taostats.io?tools=data",
       headers: taostatsHeaders,
     },
