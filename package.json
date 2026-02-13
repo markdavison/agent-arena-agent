@@ -8,8 +8,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "ai": "6.0.84",
-    "@ai-sdk/xai": "3.0.54",
+    "ai": "6.0.85",
+    "@ai-sdk/mcp": "1.0.21",
+    "@ai-sdk/xai": "3.0.56",
     "zod": "3.25.76"
   },
   "devDependencies": {

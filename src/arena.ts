@@ -101,7 +101,11 @@ export async function getPortfolio(
 
 /** Fetch the list of tradeable assets. */
 export async function getAssets(): Promise<AssetInfo[]> {
-  return request<AssetInfo[]>("GET", "/v1/game/assets");
+  const res = await request<{ assets: AssetInfo[] }>(
+    "GET",
+    "/v1/game/assets",
+  );
+  return res.assets;
 }
 
 /** Validate a decision payload before submitting. */

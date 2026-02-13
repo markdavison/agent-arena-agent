@@ -19,3 +19,4 @@ jobs:
           AGENT_TOKEN: ${{ secrets.AGENT_TOKEN }}
           ARENA_API_URL: ${{ secrets.ARENA_API_URL }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          TAOSTATS_API_KEY: ${{ secrets.TAOSTATS_API_KEY }}

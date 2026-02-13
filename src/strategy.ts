@@ -1,3 +1,4 @@
+import { createMCPClient } from "@ai-sdk/mcp";
 import { generateObject } from "ai";
 import { xai } from "@ai-sdk/xai";
 import { z } from "zod";
@@ -52,7 +53,9 @@ Strategy guidelines:
 - Be conservative — don't trade your entire balance at once
 - Keep some USD as a safety buffer
 - Return an empty trades array if you prefer to hold your current positions
-- Consider the time remaining in the interval when deciding trade sizes`;
+- Consider the time remaining in the interval when deciding trade sizes
+
+You have access to Taostats tools for live market data. Use them to look up current TAO price and subnet pool data before making trading decisions.`;
 
 function buildPrompt(input: StrategyInput): string {
   const { portfolio, clock, assets } = input;
@@ -72,18 +75,42 @@ function buildPrompt(input: StrategyInput): string {
     `Available assets: ${assetIds}`,
     "",
     `Seconds remaining in interval: ${String(clock.seconds_remaining)}`,
+    "",
+    "Fetch current market data using the Taostats tools, then decide your trades.",
   ].join("\n");
 }
 
 export async function decide(
   input: StrategyInput,
 ): Promise<StrategyOutput> {
-  const { object } = await generateObject({
-    model: xai("grok-3-mini"),
-    schema: tradeSchema,
-    system: SYSTEM_PROMPT,
-    prompt: buildPrompt(input),
+  const taostatsKey = process.env["TAOSTATS_API_KEY"] ?? "";
+  const headers: Record<string, string> = {};
+  if (taostatsKey) {
+    headers["Authorization"] = taostatsKey;
+  }
+
+  const client = await createMCPClient({
+    transport: {
+      type: "sse",
+      url: "https://mcp.taostats.io?tools=data",
+      headers,
+    },
   });
 
-  return object;
+  try {
+    const mcpTools = await client.tools();
+
+    const { object } = await generateObject({
+      model: xai("grok-3-mini"),
+      schema: tradeSchema,
+      tools: mcpTools,
+      maxSteps: 5,
+      system: SYSTEM_PROMPT,
+      prompt: buildPrompt(input),
+    });
+
+    return object;
+  } finally {
+    await client.close();
+  }
 }
