@@ -113,13 +113,16 @@ export async function decide(
       prompt: buildPrompt(input),
     });
 
-    console.log(`[strategy] Grok used ${String(steps.length)} step(s)`);
-    for (const step of steps) {
-      if (step.toolCalls.length > 0) {
-        const names = step.toolCalls
-          .map((c) => c.toolName)
-          .join(", ");
-        console.log(`[strategy] Tool calls: ${names}`);
+    if (steps) {
+      console.log(`[strategy] Grok used ${String(steps.length)} step(s)`);
+      for (const step of steps) {
+        const calls = step.toolCalls ?? [];
+        if (calls.length > 0) {
+          const names = calls
+            .map((c: { toolName: string }) => c.toolName)
+            .join(", ");
+          console.log(`[strategy] Tool calls: ${names}`);
+        }
       }
     }
 
