@@ -89,9 +89,10 @@ export async function decide(
     headers["Authorization"] = taostatsKey;
   }
 
+  console.log("[strategy] Connecting to Taostats MCP...");
   const client = await createMCPClient({
     transport: {
-      type: "sse",
+      type: "http",
       url: "https://mcp.taostats.io?tools=data",
       headers,
     },
@@ -99,8 +100,11 @@ export async function decide(
 
   try {
     const mcpTools = await client.tools();
+    const toolNames = Object.keys(mcpTools);
+    console.log(`[strategy] MCP tools: ${toolNames.join(", ")}`);
 
-    const { object } = await generateObject({
+    console.log("[strategy] Calling Grok...");
+    const { object, steps } = await generateObject({
       model: xai("grok-3-mini"),
       schema: tradeSchema,
       tools: mcpTools,
@@ -108,6 +112,16 @@ export async function decide(
       system: SYSTEM_PROMPT,
       prompt: buildPrompt(input),
     });
+
+    console.log(`[strategy] Grok used ${String(steps.length)} step(s)`);
+    for (const step of steps) {
+      if (step.toolCalls.length > 0) {
+        const names = step.toolCalls
+          .map((c) => c.toolName)
+          .join(", ");
+        console.log(`[strategy] Tool calls: ${names}`);
+      }
+    }
 
     return object;
   } finally {
