@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createMCPClient } from "@ai-sdk/mcp";
+import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio";
 import type { ToolSet } from "ai";
 import { runStrategy } from "./strategy.js";
 import { runConfigStrategy } from "./config-strategy.js";
@@ -106,24 +107,28 @@ async function connectMcpServers(
     const expanded = expandAllEnvVars(server.transport);
 
     console.log(`[agent] Connecting to ${name} MCP server...`);
-    let transport;
+    let client;
     if (expanded.type === "stdio") {
-      transport = {
-        type: "stdio" as const,
-        command: expanded.command,
-        args: expanded.args ?? [],
-        env: { ...process.env, ...expanded.env } as Record<
-          string,
-          string
-        >,
-      };
+      const stdioTransport = new Experimental_StdioMCPTransport(
+        {
+          command: expanded.command,
+          args: expanded.args ?? [],
+          env: { ...process.env, ...expanded.env } as Record<
+            string,
+            string
+          >,
+        },
+      );
+      client = await createMCPClient({
+        transport: stdioTransport,
+      });
     } else {
       const url = buildTransportUrl(
         expanded.url,
         expanded.params,
       );
       const { headers } = expanded;
-      transport =
+      const transport =
         expanded.type === "sse"
           ? {
               type: "sse" as const,
@@ -135,9 +140,8 @@ async function connectMcpServers(
               url,
               ...(headers ? { headers } : {}),
             };
+      client = await createMCPClient({ transport });
     }
-
-    const client = await createMCPClient({ transport });
     const tools = await client.tools();
     connected.push({ name, client, tools });
   }
