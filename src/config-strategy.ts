@@ -44,7 +44,7 @@ export async function runConfigStrategy(
 ): Promise<void> {
   const model = getModel(config);
 
-  await generateText({
+  const result = await generateText({
     model,
     tools,
     stopWhen: stepCountIs(10),
@@ -52,4 +52,14 @@ export async function runConfigStrategy(
     prompt:
       "Analyze the market and make your trading decision for this interval.",
   });
+
+  for (const step of result.steps) {
+    for (const call of step.toolCalls) {
+      console.log(`[agent] Tool call: ${call.toolName}`);
+    }
+  }
+  console.log(
+    `[agent] Completed ${String(result.steps.length)} step(s), ` +
+      `${String(result.steps.reduce((n, s) => n + s.toolCalls.length, 0))} tool call(s)`,
+  );
 }
