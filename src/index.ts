@@ -1,5 +1,7 @@
+import { existsSync, readFileSync } from "node:fs";
 import { createMCPClient } from "@ai-sdk/mcp";
 import { runStrategy } from "./strategy.js";
+import { runConfigStrategy } from "./config-strategy.js";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -25,7 +27,6 @@ function buildWorkflowRunUrl(): string | undefined {
 async function main(): Promise<void> {
   const agentToken = requireEnv("AGENT_TOKEN");
   const apiUrl = requireEnv("ARENA_API_URL").replace(/\/+$/, "");
-  requireEnv("XAI_API_KEY");
   const taostatsKey = process.env["TAOSTATS_API_KEY"] ?? "";
   console.log("[agent] Starting agent");
 
@@ -49,6 +50,7 @@ async function main(): Promise<void> {
     transport: { type: "sse", url: arenaSseUrl },
   });
 
+  const taostatsUrl = new URL("https://mcp.taostats.io?tools=data");
   const taostatsHeaders: Record<string, string> = {};
   if (taostatsKey) {
     taostatsHeaders["Authorization"] = taostatsKey;
@@ -57,8 +59,8 @@ async function main(): Promise<void> {
   console.log("[agent] Connecting to Taostats MCP server...");
   const taostatsClient = await createMCPClient({
     transport: {
-      type: "http",
-      url: "https://mcp.taostats.io?tools=data",
+      type: "sse",
+      url: taostatsUrl.toString(),
       headers: taostatsHeaders,
     },
   });
@@ -72,7 +74,12 @@ async function main(): Promise<void> {
     );
 
     console.log("[agent] Running strategy...");
-    await runStrategy(allTools);
+    if (existsSync("agent.config.json")) {
+      const config = JSON.parse(readFileSync("agent.config.json", "utf-8"));
+      await runConfigStrategy(allTools, config);
+    } else {
+      await runStrategy(allTools);
+    }
     console.log("[agent] Strategy complete");
   } finally {
     await arenaClient.close();
