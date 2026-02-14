@@ -50,23 +50,26 @@ async function main(): Promise<void> {
     transport: { type: "sse", url: arenaSseUrl },
   });
 
-  const taostatsHeaders: Record<string, string> = {};
+  let taostatsClient: Awaited<ReturnType<typeof createMCPClient>> | null =
+    null;
   if (taostatsKey) {
-    taostatsHeaders["Authorization"] = taostatsKey;
+    console.log("[agent] Connecting to Taostats MCP server...");
+    taostatsClient = await createMCPClient({
+      transport: {
+        type: "http",
+        url: "https://mcp.taostats.io?tools=data",
+        headers: { Authorization: taostatsKey },
+      },
+    });
+  } else {
+    console.log("[agent] No TAOSTATS_API_KEY set, skipping Taostats");
   }
-
-  console.log("[agent] Connecting to Taostats MCP server...");
-  const taostatsClient = await createMCPClient({
-    transport: {
-      type: "http",
-      url: "https://mcp.taostats.io?tools=data",
-      headers: taostatsHeaders,
-    },
-  });
 
   try {
     const arenaTools = await arenaClient.tools();
-    const taostatsTools = await taostatsClient.tools();
+    const taostatsTools = taostatsClient
+      ? await taostatsClient.tools()
+      : {};
     const allTools = { ...arenaTools, ...taostatsTools };
     console.log(
       `[agent] Loaded ${String(Object.keys(allTools).length)} tools`,
@@ -82,7 +85,7 @@ async function main(): Promise<void> {
     console.log("[agent] Strategy complete");
   } finally {
     await arenaClient.close();
-    await taostatsClient.close();
+    if (taostatsClient) await taostatsClient.close();
   }
 }
 
