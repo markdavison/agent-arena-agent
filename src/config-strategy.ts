@@ -38,7 +38,10 @@ function getModel(config: AgentConfig) {
           `Unknown provider "${provider}" with no base_url`,
         );
       }
-      return createOpenAI({ baseURL: base_url, apiKey })(model_id);
+      return createOpenAI({
+        baseURL: base_url,
+        apiKey,
+      }).chat(model_id);
   }
 }
 
