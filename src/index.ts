@@ -4,12 +4,21 @@ import type { ToolSet } from "ai";
 import { runStrategy } from "./strategy.js";
 import { runConfigStrategy } from "./config-strategy.js";
 
-interface McpTransport {
+interface McpHttpTransport {
   type: "sse" | "http";
   url: string;
   params?: Record<string, string>;
   headers?: Record<string, string>;
 }
+
+interface McpStdioTransport {
+  type: "stdio";
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
+type McpTransport = McpHttpTransport | McpStdioTransport;
 
 interface McpServerConfig {
   requires?: string[];
@@ -95,22 +104,38 @@ async function connectMcpServers(
     }
 
     const expanded = expandAllEnvVars(server.transport);
-    const url = buildTransportUrl(expanded.url, expanded.params);
-    const { headers } = expanded;
 
     console.log(`[agent] Connecting to ${name} MCP server...`);
-    const transport =
-      expanded.type === "sse"
-        ? {
-            type: "sse" as const,
-            url,
-            ...(headers ? { headers } : {}),
-          }
-        : {
-            type: "http" as const,
-            url,
-            ...(headers ? { headers } : {}),
-          };
+    let transport;
+    if (expanded.type === "stdio") {
+      transport = {
+        type: "stdio" as const,
+        command: expanded.command,
+        args: expanded.args ?? [],
+        env: { ...process.env, ...expanded.env } as Record<
+          string,
+          string
+        >,
+      };
+    } else {
+      const url = buildTransportUrl(
+        expanded.url,
+        expanded.params,
+      );
+      const { headers } = expanded;
+      transport =
+        expanded.type === "sse"
+          ? {
+              type: "sse" as const,
+              url,
+              ...(headers ? { headers } : {}),
+            }
+          : {
+              type: "http" as const,
+              url,
+              ...(headers ? { headers } : {}),
+            };
+    }
 
     const client = await createMCPClient({ transport });
     const tools = await client.tools();
