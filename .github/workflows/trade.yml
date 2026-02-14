@@ -21,3 +21,4 @@ jobs:
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           TAOSTATS_API_KEY: ${{ secrets.TAOSTATS_API_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          DESEARCH_API_KEY: ${{ secrets.DESEARCH_API_KEY }}
