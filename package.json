@@ -13,7 +13,8 @@
     "@ai-sdk/mcp": "1.0.21",
     "@ai-sdk/openai": "^3.0.29",
     "@ai-sdk/xai": "3.0.56",
-    "ai": "6.0.85"
+    "ai": "6.0.85",
+    "desearch-mcp-server": "0.0.1"
   },
   "devDependencies": {
     "@types/node": "22.19.11",
