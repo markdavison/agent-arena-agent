@@ -50,7 +50,6 @@ async function main(): Promise<void> {
     transport: { type: "sse", url: arenaSseUrl },
   });
 
-  const taostatsUrl = new URL("https://mcp.taostats.io?tools=data");
   const taostatsHeaders: Record<string, string> = {};
   if (taostatsKey) {
     taostatsHeaders["Authorization"] = taostatsKey;
@@ -59,8 +58,8 @@ async function main(): Promise<void> {
   console.log("[agent] Connecting to Taostats MCP server...");
   const taostatsClient = await createMCPClient({
     transport: {
-      type: "sse",
-      url: taostatsUrl.toString(),
+      type: "http",
+      url: "https://mcp.taostats.io?tools=data",
       headers: taostatsHeaders,
     },
   });
